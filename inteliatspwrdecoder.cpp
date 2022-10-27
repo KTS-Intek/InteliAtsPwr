@@ -200,7 +200,7 @@ QVariantHash InteliAtsPwrDecoder::decodeMeterData(const DecodeMeterMess &threeHa
     ErrCounters errwarns   = ErrCounters(qMax(0, hashTmpData.value("warning_counter", 0).toInt()), qMax(0, hashTmpData.value("error_counter", 0).toInt()));
 
 
-    const MessageValidatorResult decoderesult = ModbusProcessor4PMAC211::messageIsValidExt(hashRead.value("readArr_0").toByteArray(), lastAddr);
+    const MessageValidatorResult decoderesult = ModbusMessanger::messageIsValidExt(hashRead.value("readArr_0").toByteArray(), lastAddr);
     if(!decoderesult.isValid){
         QString warn;
         QString err = decoderesult.errstr;
@@ -321,7 +321,7 @@ QVariantHash InteliAtsPwrDecoder::fullVoltage(const MessageValidatorResult &deco
 
             QVariantHash onevmhash;
 
-            onevmhash.insert("UA", voltageLoadFreqValues.value(prefix + listUKeys.at(i)));//add A,B,C values as A value
+            onevmhash.insert("UX", voltageLoadFreqValues.value(prefix + listUKeys.at(i)));//add A,B,C values as A value
             onevmhash.insert("F", voltageLoadFreqValues.value(prefix + "F"));
 
             const QString enrgPrefix = ((c == 0 && ledGCBGreen) || (c == 1 && ledMCBGreen)) ? "" : "ignore";
@@ -334,7 +334,7 @@ QVariantHash InteliAtsPwrDecoder::fullVoltage(const MessageValidatorResult &deco
                 QString outKey = listLoadKeys.at(j) + enrgPrefix;
                 const QString srcKey = outKey;
                 outKey.chop(1);
-                outKey.append("A");
+                outKey.append("X");//use X the add2database method adds it with necessary letter
 
                 onevmhash.insert(outKey, voltageLoadFreqValues.value(srcKey, "0"));
             }
@@ -362,10 +362,14 @@ QVariantHash InteliAtsPwrDecoder::fullVoltage(const MessageValidatorResult &deco
 
 QVariantHash InteliAtsPwrDecoder::preparyTotalEnrg(const QVariantHash &hashConstData, QVariantHash &hashTmpData)
 {
-    if(hashConstData.value("vrsn").toString().isEmpty() && hashTmpData.value("vrsn").toString().isEmpty()){
-        //receve vrsn
-        return preparyVoltage(hashConstData, hashTmpData);
+    if(hashTmpData.value("vrsn").toString().isEmpty()){
+        if(hashConstData.value("vrsn").toString().isEmpty())
+            return preparyVoltage(hashConstData, hashTmpData);
+
+        hashTmpData.insert("vrsn", hashConstData.value("vrsn"));
     }
+
+
 
     const quint8 localstep = hashTmpData.value("IANT_step", 0).toUInt();
 
@@ -407,7 +411,7 @@ QVariantHash InteliAtsPwrDecoder::fullTotalEnrg(const MessageValidatorResult &de
     }
 
 
-    if(hashConstData.value("vrsn").toString().isEmpty() && hashTmpData.value("vrsn").toString().isEmpty()){
+    if(hashTmpData.value("vrsn").toString().isEmpty()){
         //receve vrsn
 
         if(decoderesult.listMeterMessage.size() < 70){
@@ -470,6 +474,8 @@ QVariantHash InteliAtsPwrDecoder::fullTotalEnrg(const MessageValidatorResult &de
 
 QVariantHash InteliAtsPwrDecoder::preparyMeterState(const QVariantHash &hashConstData, QVariantHash &hashTmpData)
 {
+    //all necessary registers are received  with voltage values
+    return preparyVoltage(hashConstData, hashTmpData);
 
 }
 
@@ -477,7 +483,76 @@ QVariantHash InteliAtsPwrDecoder::preparyMeterState(const QVariantHash &hashCons
 
 QVariantHash InteliAtsPwrDecoder::fullMeterState(const MessageValidatorResult &decoderesult, const QVariantHash &hashTmpData, quint16 &step, ErrCounters &warnerr)
 {
+    Q_UNUSED(warnerr);
+    Q_UNUSED(hashTmpData);
+    QVariantHash resulthash;
 
+    if(decoderesult.listMeterMessage.isEmpty() || decoderesult.errCode != MODBUS_ERROR_HAS_NO_ERRORS || decoderesult.listMeterMessage.size() < 70){
+        resulthash.insert("messFail", true);
+        resulthash.insert("IANTPWR_step", 0);
+        return resulthash;
+    }
+
+    /*
+ * 1. get vrsn
+ * 2. what CB is Closed MCB or GCB? It has only one set of CTs, so apply Load values to the active CB
+ * 3. gen and mains freq
+ * 4. generate vm_x with phase A values
+*/
+
+
+    //add vrsn
+    addDevVersion(resulthash, decoderesult.listMeterMessage);
+
+    const bool ledGCBGreen = decoderesult.listMeterMessage.at(64); //40065 generator CB
+    const bool ledMCBGreen = decoderesult.listMeterMessage.at(65); //40066 mains CB
+
+
+    quint16 vmIndex = 0U;// = hashTmpData.value("lastVirtualMeterIndex", 0U).toUInt();
+
+
+    //it has a pair of 3phases
+    // Generator and Main
+
+    /*
+     * One IA-NT has two meters Gen and Mains. Both are 3ph.
+     * vm_1, vm_2, vm_3  are Gen L1, L2, L3 (or A, B, C) sensors
+     * vm_4, vm_5, vm_6  are Mains L1, L2, L3 (or A, B, C) sensors
+    */
+
+
+    for(int i = 0; i < 6; i++){
+
+
+//#define RELAY_STATE_UNKN        0
+//#define RELAY_STATE_LOAD_ON     1  //main "relay_all_power_on" : secondary "relay_2_power_on"
+//#define RELAY_STATE_LOAD_OFF    2
+//#define RELAY_STATE_NOT_SUP     3
+//#define RELAY_STATE_OFF_PRSBTTN 4
+
+        const QString vmkey = QString("vm_%1").arg(vmIndex + 1);
+
+        QVariantHash onevmhash;
+        quint8 mainstts = RELAY_STATE_UNKN;
+
+        mainstts = ((i < 3 && ledGCBGreen) || (i >= 3 && ledMCBGreen)) ? RELAY_STATE_LOAD_ON : RELAY_STATE_LOAD_OFF;
+
+        MeterPluginHelper::addRelayStatusAll(onevmhash, mainstts, RELAY_STATE_NOT_SUP);
+        resulthash.insert(vmkey, onevmhash);//it starts from 1
+        vmIndex++;
+
+    }
+
+
+    if(verboseMode)
+        qDebug() << "InteliAtsPwrDecoder::fullMeterState resulthash " << resulthash ;
+
+    resulthash.insert("messFail", false);//go to the next energy
+    resulthash.insert("lastVirtualMeterIndex", vmIndex);//go to the next virtual meter
+
+    step = 0xFFFF;
+
+    return resulthash;
 }
 
 //---------------------------------------------------------------------
@@ -519,7 +594,7 @@ void InteliAtsPwrDecoder::addDevVersion(QVariantHash &hashTmpData, const ModbusA
     QStringList vrsn;
 
     for(int i = 40075 - MODBUS_IANTPWR_STARTVOLTAGE_REGISTER, imax = listMeterMessage.size(), j = 0; i < imax && j < 3; i++, j++){
-        vrsn.prepend(QString::number(listMeterMessage.at(lindex.at(i))));
+        vrsn.prepend(QString::number(listMeterMessage.at(i)));
     }
 
     if(vrsn.isEmpty())
@@ -594,7 +669,7 @@ QHash<QString, QString> InteliAtsPwrDecoder::addVoltageLoadFreqValues(const Modb
                                       "cos_fC,27,28,29,30,"
                                       "31,32,33,34,35,"
                                       "MUA,MUB,MUC,39,40,"
-                                      "41,42,MF");
+                                      "41,42,MF").split(",");
 
     QMap<QString,qreal> mapDecimals;
     mapDecimals.insert("GF", 0.1);
@@ -621,84 +696,6 @@ QHash<QString, QString> InteliAtsPwrDecoder::addVoltageLoadFreqValues(const Modb
 
 
 
-//---------------------------------------------------------------------
-
-QMap<QString, ModbusAnswerList> InteliAtsPwrDecoder::normalizeBranchCircuitEnergy(const ModbusAnswerList &inputListMeterMess)
-{
-    /*
-     * vm_%1
-*/
-
-    QMap<QString, ModbusAnswerList> out;
-    for(int vm = 0, maxlen = inputListMeterMess.size(), indx = 0; indx < maxlen; vm++){
-        ModbusAnswerList onevmlist;
-        //pmac201hw A
-        //spm20 A PL PH QL QH SL SH PF TAL TAH TRL TRH
-
-        //40201 A phase kwh A+ first byte U32 0.1
-        //40224 C phase kwh A+ last byte U32 0.1
-        //40233 A phase kwh A- first byte U32 0.1
-        //40256 C phase kwh A- last byte U32 0.1
-
-        if(indx == 24 || vm == 12){
-            indx = 64;//to jump over total phase values and reserved registers
-            vm = 0;
-        }
-
-        if(indx > 24)
-            onevmlist = out.value(QString("vm_%1").arg(vm + 1));//A+ or R-
-
-        for(int reg = 0; indx < maxlen && reg < 2; indx++, reg++){
-            onevmlist.append(inputListMeterMess.at(indx));
-        }
-
-        out.insert(QString("vm_%1").arg(vm + 1), onevmlist);//vm_1 is the first virtual meter, each meter has 4 bytes,
-
-    }
-    return out;
-}
-
-//---------------------------------------------------------------------
-
-QStringList InteliAtsPwrDecoder::getOneBranchCircuitValues(const ModbusAnswerList &listMeterMessage)
-{
-    QStringList out;
-    if(listMeterMessage.size() == 6){
-
-        //40011 A uint16
-        //40027 P int32  W to kW
-        //40047 Q int32  var to kvar
-        //40067 PF uint16
-
-        out = ModbusMessanger::convertTwoRegisters2oneValueStr(listMeterMessage.mid(1, 4), 0.0001, 4);// P and Q
-
-
-        const qreal current = qreal(listMeterMessage.at(0)) * 0.1;
-        out.prepend(PrettyValues::prettyNumber(current, 1, 1));
-
-
-        const qreal powerfactor = qreal(listMeterMessage.at(5)) * 0.001;
-        out.append(PrettyValues::prettyNumber(powerfactor, 3, 3));
-
-    }
-    return out;
-}
-
-//---------------------------------------------------------------------
-
-QStringList InteliAtsPwrDecoder::getOneBranchCircuitKeys()
-{
-    //QString("UA,IA,PA,QA,cos_fA,F").split(',') :
-    return QString("IA,PA,QA,cos_fA").split(",");
-}
-
-//---------------------------------------------------------------------
-
-QStringList InteliAtsPwrDecoder::getOneBranchCircuitXKeys()
-{
-    //X must be changed to the necessary phase letter {A,B,C}
-    return QString("IX,PX,QX,cos_fX").split(",");
-}
 
 //---------------------------------------------------------------------
 

@@ -81,12 +81,7 @@ public:
 
     QHash<QString,QString> addVoltageLoadFreqValues(const ModbusAnswerList &listMeterMessage);
 
-    QMap<QString, ModbusAnswerList> normalizeBranchCircuitEnergy(const ModbusAnswerList &inputListMeterMess);
 
-
-    QStringList getOneBranchCircuitValues(const ModbusAnswerList &listMeterMessage);
-    QStringList getOneBranchCircuitKeys();
-    QStringList getOneBranchCircuitXKeys();
 
 
     QStringList getOneBranchCircuitEnergy(const ModbusAnswerList &listMeterMessage);

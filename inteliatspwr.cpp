@@ -75,6 +75,8 @@ QStringList InteliAtsPwr::getEnrgList4thisMeter(const quint8 &pollCode, const QS
     return InteliAtsPwrDecoder::getSupportedEnrg(pollCode);
 }
 
+//------------------------------------------------------------------------------------------------------------
+
 quint8 InteliAtsPwr::getMeterTypeTag()
 {
     return  UC_METER_ELECTRICITY;
@@ -129,7 +131,7 @@ QString InteliAtsPwr::meterTypeFromMessage(const QByteArray &readArr)
 QVariantHash InteliAtsPwr::isItYour(const QByteArray &arr)
 {
     QByteArray dest;
-    const MessageValidatorResult decoderesult = ModbusProcessor4PMAC211::messageIsValidExt(arr, encoderdecoder.lastAddr);
+    const MessageValidatorResult decoderesult = ModbusMessanger::messageIsValidExt(arr, encoderdecoder.lastAddr);
     if(decoderesult.isValid){
         dest = QByteArray::number(encoderdecoder.lastAddr);//is it good???
         QVariantHash hash;
