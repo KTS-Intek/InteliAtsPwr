@@ -228,6 +228,9 @@ QVariantHash InteliAtsPwrDecoder::decodeMeterData(const DecodeMeterMess &threeHa
 
     }
 
+    if(!decodehash.value("messFail").toBool() && !hashTmpData.contains("SN")){
+        decodehash.insert("SN", hashConstData.value("ModemNI").toString());
+    }
 
     return decodeEnd(decodehash, errwarns, step, hashTmpData);
 }
@@ -462,7 +465,7 @@ QVariantHash InteliAtsPwrDecoder::fullTotalEnrg(const MessageValidatorResult &de
 
     resulthash.insert("messFail", false);//go to the next energy
     resulthash.insert("lastVirtualMeterIndex", vmIndex);//go to the next virtual meter
-
+    resulthash.insert("IANT_step", localstep + 1);
 
     if(localstep > 0)
         step = 0xFFFF;
@@ -600,6 +603,7 @@ void InteliAtsPwrDecoder::addDevVersion(QVariantHash &hashTmpData, const ModbusA
     if(vrsn.isEmpty())
         return;
     hashTmpData.insert("vrsn", QString("FW.%1").arg(vrsn.join(".")));
+
     //    const QList<int> lindex = QList<int>() << 0 << 1 << 2 << 10 :
 
 }
@@ -665,7 +669,7 @@ QHash<QString, QString> InteliAtsPwrDecoder::addVoltageLoadFreqValues(const Modb
                                       "6,7,IA,IB,IC,"
                                       "11,GF,13,14,PA,"
                                       "PB,PC,18,19,QA,"
-                                      "QB,QC,23,cos_fA,cos_fB"
+                                      "QB,QC,23,cos_fA,cos_fB,"
                                       "cos_fC,27,28,29,30,"
                                       "31,32,33,34,35,"
                                       "MUA,MUB,MUC,39,40,"
@@ -679,6 +683,17 @@ QHash<QString, QString> InteliAtsPwrDecoder::addVoltageLoadFreqValues(const Modb
     mapDecimals.insert("cos_fB", 0.01);
     mapDecimals.insert("cos_fC", 0.01);
 
+
+//    QMap<QString,bool> mapSignedValues;
+
+//    mapSignedValues.insert("P", true);
+//    mapSignedValues.insert("Q", true);
+//    mapSignedValues.insert("cos_f", true);
+
+
+
+
+
     const int imax = lkeys.size();
 
     QHash<QString, QString> out;
@@ -687,7 +702,13 @@ QHash<QString, QString> InteliAtsPwrDecoder::addVoltageLoadFreqValues(const Modb
 
     for(int i = 0; i < imax; i++){
         const QString key = lkeys.at(i);
-        const qreal value = qreal(listMeterMessage.at(i)) * mapDecimals.value(key, 1.0);
+        const bool isSigned = (key.startsWith("P") || key.startsWith("Q") || key.startsWith("cos_f"));
+
+        const qreal value = (isSigned ?
+                                 qreal(qint16(listMeterMessage.at(i)))
+                               : qreal(listMeterMessage.at(i)))
+                * mapDecimals.value(key, 1.0);
+
         out.insert(key, PrettyValues::prettyNumber(value, 2, 2));
     }
     return out;
@@ -704,7 +725,7 @@ QStringList InteliAtsPwrDecoder::getOneBranchCircuitEnergy(const ModbusAnswerLis
     QStringList out;
     if(listMeterMessage.size() == 4){
 
-        out = ModbusMessanger::convertTwoRegisters2oneValueStr(listMeterMessage, 1.0, 1);
+        out = ModbusMessanger::convertTwoRegisters2oneValueStrExt(listMeterMessage, 1.0, 1, true);
         out.append(out.last());//It has only one rate, x- add to the end (x is A- or R-
         out.prepend(out.first()); //because the minimum data is Summ and T1 , x+ add to the beginning (x+ is A+ or R+)
     }
