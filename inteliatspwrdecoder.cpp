@@ -213,7 +213,7 @@ QVariantHash InteliAtsPwrDecoder::decodeMeterData(const DecodeMeterMess &threeHa
     }
 
     if(hashTmpData.value("SN").toString().isEmpty() && pollCode > 0){
-        hashTmpData.insert("SN", QString::number(lastAddr));
+        hashTmpData.insert("SN", hashConstData.value("ModemNI").toString());// QString::number(lastAddr));
 
         //        hashTmpData.insert("hasVirtualMeters", true);
         //hashTmpData.insert("")
@@ -228,9 +228,9 @@ QVariantHash InteliAtsPwrDecoder::decodeMeterData(const DecodeMeterMess &threeHa
 
     }
 
-    if(!decodehash.value("messFail").toBool() && !hashTmpData.contains("SN")){
-        decodehash.insert("SN", hashConstData.value("ModemNI").toString());
-    }
+//    if(!decodehash.value("messFail").toBool() && !hashTmpData.contains("SN")){
+//        decodehash.insert("SN", hashConstData.value("ModemNI").toString());
+//    }
 
     return decodeEnd(decodehash, errwarns, step, hashTmpData);
 }
